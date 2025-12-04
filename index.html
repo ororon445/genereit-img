@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini API Image Generator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Custom styles for the generated image container */
+        .image-container {
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #e5e7eb; /* Gray-200 */
+            transition: all 0.3s ease;
+        }
+        .loading-spinner {
+            border-top-color: #3b82f6; /* Blue-500 */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <!-- Global Header -->
+    <header class="bg-white shadow-lg rounded-xl mb-6 p-4 max-w-4xl mx-auto">
+        <div class="flex items-center justify-between">
+            <h1 class="text-2xl font-extrabold text-gray-900">
+                <span class="text-blue-600">Gemini</span>
+                <span class="hidden sm:inline">Image Generator</span>
+            </h1>
+            <p class="text-sm text-gray-500 hidden md:block">A high-quality visual tool powered by Imagen 4.0</p>
+        </div>
+    </header>
+
+    <div class="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden p-6 sm:p-10">
+
+        <!-- Main Content Title (now inside the card for better flow) -->
+        <div class="text-center mb-10">
+            <h2 class="text-3xl font-extrabold text-gray-800">Create Your Image</h2>
+            <p class="text-gray-500 mt-1">Describe the scene you want the AI to visualize.</p>
+        </div>
+
+        <!-- Style Selector & Prompt Input Form -->
+        <div class="mb-8 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            
+            <!-- New Select Menu (Style Selector) -->
+            <div class="md:col-span-1">
+                <label for="styleSelector" class="block text-lg font-medium text-gray-700 mb-2">
+                    Select Style
+                </label>
+                <select 
+                    id="styleSelector" 
+                    class="w-full p-4 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150 h-[6.5rem] md:h-auto"
+                >
+                    <option value="" selected>Default (No Style)</option>
+                    <option value=", digital painting, high fantasy artstation">Digital Painting</option>
+                    <option value=", photorealistic, 8k professional photograph">Photorealistic</option>
+                    <option value=", anime style, cinematic lighting">Anime/Manga Style</option>
+                    <option value=", watercolor painting, delicate brushstrokes">Watercolor Painting</option>
+                    <option value=", cyberpunk style, neon lights, dark atmosphere">Cyberpunk Art</option>
+                    <option value=", vaporwave aesthetic, pastel colors, glitch effect">Vaporwave</option>
+                    <option value=", pixel art, 8-bit, retro game style">Pixel Art</option>
+                    <option value=", intricate pencil sketch, detailed shading, line art">Pencil Sketch</option>
+                    <option value=", 3D render, Octane render, cinematic volumetric light">3D Render</option>
+                    <option value=", classic oil painting on canvas, thick impasto">Oil Painting</option>
+                </select>
+            </div>
+
+            <!-- Existing Prompt Input -->
+            <div class="md:col-span-3">
+                <label for="prompt" class="block text-lg font-medium text-gray-700 mb-2">
+                    What image do you want to create?
+                </label>
+                <textarea
+                    id="prompt"
+                    rows="3"
+                    class="w-full p-4 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                    placeholder="A futuristic city skyline at sunset, digital painting, highly detailed (16:9 aspect ratio)"
+                ></textarea>
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <div class="flex flex-col sm:flex-row gap-4 mb-10">
+            <button
+                id="generateButton"
+                class="flex-1 bg-blue-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:bg-blue-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                onclick="generateImage()"
+            >
+                Generate Image
+            </button>
+            <button
+                id="downloadButton"
+                class="sm:w-1/3 bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-xl shadow-md hover:bg-gray-300 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled
+                onclick="downloadImage()"
+            >
+                Download Image
+            </button>
+        </div>
+
+        <!-- Generated Image Area -->
+        <div>
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Generated Visual:</h2>
+            <div id="outputContainer" class="image-container rounded-xl shadow-inner border border-gray-300">
+                <p id="initialMessage" class="text-gray-500 p-8 text-center">Your generated image will appear here. The model used is `imagen-4.0-generate-001`.</p>
+                <!-- Image or Loading Spinner will be inserted here -->
+            </div>
+            <p id="errorMessage" class="text-red-600 mt-4 font-medium hidden"></p>
+        </div>
+    </div>
+
+    <!-- Global Footer -->
+    <footer class="max-w-4xl mx-auto mt-6 text-center text-gray-500 text-xs p-4">
+        <p>&copy; 2025-2026 AI Image Generator App. All rights reserved.</p>
+        <p class="mt-1">Images created using Google's Imagen 4.0 via the Gemini API.</p>
+    </footer>
+
+    <!-- JavaScript for API Interaction -->
+    <script>
+        // Set the model ID for high-quality image generation
+        const MODEL_ID = "imagen-4.0-generate-001";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:predict`;
+        const apiKey = ""; // Canvas will automatically provide the key if this is empty
+
+        // DOM elements
+        const promptInput = document.getElementById('prompt');
+        const generateButton = document.getElementById('generateButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const outputContainer = document.getElementById('outputContainer');
+        const initialMessage = document.getElementById('initialMessage');
+        const errorMessage = document.getElementById('errorMessage');
+
+        let generatedImageUrl = null;
+
+        /**
+         * Hides the error message and clears any previous image.
+         */
+        function resetState() {
+            errorMessage.classList.add('hidden');
+            errorMessage.textContent = '';
+            generatedImageUrl = null;
+            downloadButton.disabled = true;
+
+            // Clear previous content but keep the initial message if it exists
+            const existingImage = outputContainer.querySelector('img');
+            const existingSpinner = outputContainer.querySelector('.loading-spinner');
+            if (existingImage) existingImage.remove();
+            if (existingSpinner) existingSpinner.remove();
+
+            if (initialMessage.classList.contains('hidden')) {
+                initialMessage.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Displays the loading state (spinner).
+         */
+        function showLoading() {
+            resetState();
+            initialMessage.classList.add('hidden');
+            generateButton.disabled = true;
+            generateButton.textContent = 'Generating...';
+
+            const spinnerHtml = `
+                <div class="loading-spinner h-12 w-12 border-4 border-gray-200 rounded-full border-b-transparent"></div>
+            `;
+            outputContainer.innerHTML = spinnerHtml;
+        }
+
+        /**
+         * Displays an error message.
+         * @param {string} message - The error message to display.
+         */
+        function showError(message) {
+            outputContainer.innerHTML = `<p class="text-red-600 p-8 text-center">Error: ${message}</p>`;
+            errorMessage.textContent = 'Failed to generate image. Please try a different prompt.';
+            errorMessage.classList.remove('hidden');
+        }
+
+        /**
+         * Displays the generated image.
+         * @param {string} base64Data - The base64 encoded image data.
+         */
+        function displayImage(base64Data) {
+            generatedImageUrl = `data:image/png;base64,${base64Data}`;
+            const imageHtml = `
+                <img
+                    id="generatedImage"
+                    src="${generatedImageUrl}"
+                    alt="AI Generated Image"
+                    class="w-full h-full object-contain rounded-xl"
+                />
+            `;
+            outputContainer.innerHTML = imageHtml;
+            outputContainer.style.backgroundColor = 'transparent'; // Remove background color once image is loaded
+
+            generateButton.disabled = false;
