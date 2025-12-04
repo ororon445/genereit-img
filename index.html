@@ -63,7 +63,8 @@
                 </label>
                 <select 
                     id="styleSelector" 
-                    class="w-full p-4 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150 h-[6.5rem] md:h-auto"
+                    class="w-full p-4 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                    onchange="updatePromptPlaceholder()"
                 >
                     <option value="" selected>Default (No Style)</option>
                     <option value=", digital painting, high fantasy artstation">Digital Painting</option>
@@ -88,7 +89,7 @@
                     id="prompt"
                     rows="3"
                     class="w-full p-4 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition duration-150"
-                    placeholder="A futuristic city skyline at sunset, digital painting, highly detailed (16:9 aspect ratio)"
+                    placeholder="A futuristic city skyline at sunset, highly detailed"
                 ></textarea>
             </div>
         </div>
@@ -135,6 +136,7 @@
         const MODEL_ID = "imagen-4.0-generate-001";
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:predict`;
         const apiKey = ""; // Canvas will automatically provide the key if this is empty
+        const styleSelector = document.getElementById('styleSelector');
 
         // DOM elements
         const promptInput = document.getElementById('prompt');
@@ -145,6 +147,24 @@
         const errorMessage = document.getElementById('errorMessage');
 
         let generatedImageUrl = null;
+
+        /**
+         * Simple helper function to update placeholder based on style selection.
+         */
+        function updatePromptPlaceholder() {
+            const selectedStyle = styleSelector.options[styleSelector.selectedIndex].text;
+            let placeholder = "A lone astronaut floating in space, deep blue background, detailed helmet";
+
+            if (selectedStyle === 'Digital Painting') {
+                placeholder = "A fierce dragon guarding a treasure chest in a cave, digital painting, dramatic lighting";
+            } else if (selectedStyle === 'Photorealistic') {
+                placeholder = "Close-up portrait of a Shiba Inu puppy wearing a tiny knitted hat, photorealistic, 8k";
+            } else if (selectedStyle === 'Cyberpunk Art') {
+                placeholder = "A rainy night in Neo-Tokyo, street vendor selling noodles under neon signs, cyberpunk style";
+            }
+
+            promptInput.placeholder = placeholder;
+        }
 
         /**
          * Hides the error message and clears any previous image.
@@ -164,6 +184,7 @@
             if (initialMessage.classList.contains('hidden')) {
                 initialMessage.classList.remove('hidden');
             }
+            outputContainer.style.backgroundColor = '#e5e7eb'; // Reset background color
         }
 
         /**
@@ -173,12 +194,13 @@
             resetState();
             initialMessage.classList.add('hidden');
             generateButton.disabled = true;
-            generateButton.textContent = 'Generating...';
+            generateButton.textContent = 'Generating... Please wait, this may take a moment.';
 
             const spinnerHtml = `
                 <div class="loading-spinner h-12 w-12 border-4 border-gray-200 rounded-full border-b-transparent"></div>
             `;
             outputContainer.innerHTML = spinnerHtml;
+            outputContainer.style.backgroundColor = '#f3f4f6'; // Light gray while loading
         }
 
         /**
@@ -186,9 +208,12 @@
          * @param {string} message - The error message to display.
          */
         function showError(message) {
-            outputContainer.innerHTML = `<p class="text-red-600 p-8 text-center">Error: ${message}</p>`;
-            errorMessage.textContent = 'Failed to generate image. Please try a different prompt.';
+            console.error(message);
+            outputContainer.innerHTML = `<p class="text-red-600 p-8 text-center font-bold">Generation Failed</p><p class="text-gray-600 p-2 text-center">${message}</p>`;
+            errorMessage.textContent = 'Failed to generate image. Please check your prompt and try again.';
             errorMessage.classList.remove('hidden');
+            generateButton.disabled = false;
+            generateButton.textContent = 'Generate Image';
         }
 
         /**
@@ -197,15 +222,146 @@
          */
         function displayImage(base64Data) {
             generatedImageUrl = `data:image/png;base64,${base64Data}`;
+            
+            // Remove previous spinner/message
+            outputContainer.innerHTML = '';
+
             const imageHtml = `
                 <img
                     id="generatedImage"
                     src="${generatedImageUrl}"
                     alt="AI Generated Image"
                     class="w-full h-full object-contain rounded-xl"
+                    onload="this.parentElement.style.backgroundColor = 'transparent';"
                 />
             `;
             outputContainer.innerHTML = imageHtml;
-            outputContainer.style.backgroundColor = 'transparent'; // Remove background color once image is loaded
+            outputContainer.style.backgroundColor = 'transparent'; 
 
             generateButton.disabled = false;
+            generateButton.textContent = 'Generate Image';
+            downloadButton.disabled = false;
+        }
+
+        /**
+         * Fetches with exponential backoff retry mechanism.
+         * @param {string} url - The API URL.
+         * @param {object} options - Fetch options.
+         * @param {number} maxRetries - Maximum number of retries.
+         */
+        async function fetchWithRetry(url, options, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) {
+                        // Throw error to trigger retry logic for server errors (5xx) or rate limits (429)
+                        if (response.status >= 500 || response.status === 429) {
+                            throw new Error(`Server error or rate limit (${response.status})`);
+                        }
+                        // For client errors (4xx), stop and return the response immediately
+                        return response;
+                    }
+                    return response;
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        throw new Error(`Failed after ${maxRetries} attempts. ${error.message}`);
+                    }
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        /**
+         * Handles the main image generation process.
+         */
+        async function generateImage() {
+            const basePrompt = promptInput.value.trim();
+            const selectedStyle = styleSelector.value;
+            
+            if (!basePrompt) {
+                showError("Please enter a descriptive prompt.");
+                return;
+            }
+
+            // Combine base prompt with style modifier
+            const finalPrompt = `${basePrompt}${selectedStyle}`;
+
+            showLoading();
+            resetState(); // Reset error/image state
+
+            const payload = {
+                instances: [{
+                    prompt: finalPrompt
+                }],
+                parameters: {
+                    // Generate one image sample
+                    sampleCount: 1, 
+                    // Set aspect ratio to landscape (common for high-quality visuals)
+                    aspectRatio: "16:9", 
+                    // Use a creative seed for variety, if needed, though usually omitted
+                }
+            };
+            
+            try {
+                const response = await fetchWithRetry(
+                    `${API_URL}?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }
+                );
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP Error ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+                
+                // Extract the base64 encoded image data
+                const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
+
+                if (base64Data) {
+                    displayImage(base64Data);
+                } else {
+                    throw new Error("API response was successful but image data was missing or malformed.");
+                }
+
+            } catch (error) {
+                showError(error.message || "An unknown error occurred during image generation.");
+            } finally {
+                generateButton.disabled = false;
+                generateButton.textContent = 'Generate Image';
+            }
+        }
+
+        /**
+         * Handles downloading the currently displayed image.
+         */
+        function downloadImage() {
+            if (generatedImageUrl) {
+                const link = document.createElement('a');
+                link.href = generatedImageUrl;
+                
+                // Use a dynamic name based on the prompt
+                let filename = promptInput.value.substring(0, 30).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                if (filename.length > 0) {
+                    filename += '_ai_art.png';
+                } else {
+                    filename = 'ai_generated_image.png';
+                }
+                
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+        
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', updatePromptPlaceholder);
+    </script>
+</body>
+</html>
